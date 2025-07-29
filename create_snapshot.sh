@@ -1,4 +1,37 @@
-# Create a new snapshot
+�#!/bin/bash
+
+LOGFILE="/var/log/snapshot.log"
+SNAP_BASE="/srv/snapshots"
+TIMESTAMP=$(date +%Y%m%d-%H%M)
+SNAP_NAME="files-snap-${TIMESTAMP}"
+SNAP_MOUNT="${SNAP_BASE}/${TIMESTAMP}"
+USAGE_FILE="/var/log/last_snapshot_usage.txt"
+MAX_SNAPS=6
+
+echo "[$(date)] Starting snapshot process." | tee -a "$LOGFILE"
+
+# Check memory (skip if below 400MB free)
+FREE_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+if [ "$FREE_MB" -lt 400 ]; then
+  echo "[$(date)] Not enough free memory (${FREE_MB}MB) — skipping snapshot." | tee -a "$LOGFILE"
+  exit 1
+fi
+
+# Clean up old snapshots if more than MAX_SNAPS exist
+SNAPS=$(lvs --noheadings -o lv_name | grep files-snap- | sort)
+COUNT=$(echo "$SNAPS" | wc -l)
+if [ "$COUNT" -gt "$MAX_SNAPS" ]; then
+  DELETE=$(echo "$SNAPS" | head -n $(($COUNT - $MAX_SNAPS)))
+  for snap in $DELETE; do
+    MOUNT_PATH="${SNAP_BASE}/${snap#files-snap-}"
+    echo "[$(date)] Deleting old snapshot: $snap" | tee -a "$LOGFILE"
+    umount "$MOUNT_PATH" 2>/dev/null
+    lvremove -f "/dev/ubuntu_jrcb--files/$snap" >> "$LOGFILE" 2>&1
+    rm -rf "$MOUNT_PATH"
+  done
+fi
+
+# Create new snapshot
 if lvcreate -L 1G -s -n "$SNAP_NAME" /dev/ubuntu_jrcb-files/files >> "$LOGFILE" 2>&1; then
   mkdir -p "$SNAP_MOUNT"
 
