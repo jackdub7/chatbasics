@@ -60,3 +60,11 @@ if lvcreate -L 1G -s -n "$SNAP_NAME" /dev/ubuntu_jrcb-files/files >> "$LOGFILE" 
   if mount -o ro,nouuid /dev/ubuntu_jrcb-files/"$SNAP_NAME" "$SNAP_MOUNT" >> "$LOGFILE" 2>&1; then
     echo "[$(date)] Mounted $SNAP_NAME at $SNAP_MOUNT" | tee -a "$LOGFILE"
     systemctl restart smbd
+  else
+    echo "[$(date)] ERROR: Failed to mount snapshot $SNAP_NAME" | tee -a "$LOGFILE"
+    lvremove -f /dev/ubuntu_jrcb-files/"$SNAP_NAME" >> "$LOGFILE" 2>&1
+    rm -rf "$SNAP_MOUNT"
+  fi
+else
+  echo "[$(date)] ERROR: Failed to create snapshot $SNAP_NAME" | tee -a "$LOGFILE"
+fi
