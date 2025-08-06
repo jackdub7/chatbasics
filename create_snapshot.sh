@@ -1,4 +1,4 @@
-�#!/bin/bash
+#!/bin/bash
 
 LOGFILE="/var/log/snapshot.log"
 SNAP_BASE="/srv/snapshots"
@@ -6,14 +6,28 @@ TIMESTAMP=$(date +%Y%m%d-%H%M)
 SNAP_NAME="files-snap-${TIMESTAMP}"
 SNAP_MOUNT="${SNAP_BASE}/${TIMESTAMP}"
 USAGE_FILE="/var/log/last_snapshot_usage.txt"
-MAX_SNAPS=6
+MAX_SNAPS=5
 
 echo "[$(date)] Starting snapshot process." | tee -a "$LOGFILE"
+
+# Determine if changes have occurred since the last snapshot
+CURRENT_USAGE=$(du -s /srv/files | awk '{print $1}')
+if [[ -f "$USAGE_FILE" ]]; then
+  LAST_USAGE=$(cat "$USAGE_FILE")
+else
+  LAST_USAGE=0
+fi
+echo "[$(date)] Current usage: $CURRENT_USAGE KB, Last usage: $LAST_USAGE KB" | tee -a "$LOGFILE"
+if [[ "$CURRENT_USAGE" -eq "$LAST_USAGE" ]]; then
+  echo "[$(date)] No change detected. Skipping snapshot." | tee -a "$LOGFILE"
+  exit 0
+fi
+echo "$CURRENT_USAGE" > "$USAGE_FILE"
 
 # Check memory (skip if below 400MB free)
 FREE_MB=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
 if [ "$FREE_MB" -lt 400 ]; then
-  echo "[$(date)] Not enough free memory (${FREE_MB}MB) — skipping snapshot." | tee -a "$LOGFILE"
+  echo "[$(date)] Not enough free memory (${FREE_MB}MB) - skipping snapshot." | tee -a "$LOGFILE"
   exit 1
 fi
 
@@ -45,38 +59,4 @@ if lvcreate -L 1G -s -n "$SNAP_NAME" /dev/ubuntu_jrcb-files/files >> "$LOGFILE" 
 
   if mount -o ro,nouuid /dev/ubuntu_jrcb-files/"$SNAP_NAME" "$SNAP_MOUNT" >> "$LOGFILE" 2>&1; then
     echo "[$(date)] Mounted $SNAP_NAME at $SNAP_MOUNT" | tee -a "$LOGFILE"
-
-    # Check usage delta
-    CURRENT_USAGE=$(du -s /srv/files | awk '{print $1}')
-    echo "[$(date)] Current usage: $CURRENT_USAGE KB" | tee -a "$LOGFILE"
-
-    if [[ -f "$USAGE_FILE" ]]; then
-      LAST_USAGE=$(cat "$USAGE_FILE")
-      echo "[$(date)] Last usage: $LAST_USAGE KB" | tee -a "$LOGFILE"
-    else
-      LAST_USAGE=0
-    fi
-
-    echo "$CURRENT_USAGE" > "$USAGE_FILE"
-    CHANGE=$((CURRENT_USAGE - LAST_USAGE))
-
-    if [[ "$CHANGE" -eq 0 ]]; then
-      echo "[$(date)] No change detected. Deleting snapshot." | tee -a "$LOGFILE"
-      umount "$SNAP_MOUNT"
-      lvremove -f /dev/ubuntu_jrcb-files/"$SNAP_NAME" >> "$LOGFILE" 2>&1
-      rm -rf "$SNAP_MOUNT"
-    else
-      echo "[$(date)] Change detected ($CHANGE KB). Snapshot retained." | tee -a "$LOGFILE"
-      systemctl restart smbd
-    fi
-
-  else
-    echo "[$(date)] ERROR: Failed to mount snapshot $SNAP_NAME" | tee -a "$LOGFILE"
-    lvremove -f /dev/ubuntu_jrcb-files/"$SNAP_NAME"
-    rm -rf "$SNAP_MOUNT"
-  fi
-else
-  echo "[$(date)] ERROR: Failed to create snapshot $SNAP_NAME" | tee -a "$LOGFILE"
-fi
-
-
+    systemctl restart smbd
